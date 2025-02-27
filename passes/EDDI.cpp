@@ -22,6 +22,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include <array>
+#include <cstddef>
 #include <fstream>
 #include <iostream>
 #include <list>
@@ -41,6 +42,9 @@
 using namespace llvm;
 
 #define DEBUG_TYPE "eddi_verification"
+
+std::set<InvokeInst *> toFixInvokes;
+
 
 /**
  * - 0: EDDI (Add checks at every basic block)
@@ -146,7 +150,12 @@ void EDDI::duplicateOperands(
     if (isa<Instruction>(V)) {
       Instruction *Operand = cast<Instruction>(V);
       if (!isValueDuplicated(DuplicatedInstructionMap, *Operand))
-        duplicateInstruction(*Operand, DuplicatedInstructionMap, ErrBB);
+      if(duplicateInstruction(*Operand, DuplicatedInstructionMap, ErrBB)) {
+        if(InstructionsToRemove.find(Operand) == InstructionsToRemove.end()) {
+          InstructionsToRemove.insert(Operand);
+        }
+      }
+
     }
     // It may happen that we have a GEP as inline operand of a instruction. The
     // operands of the GEP are not duplicated leading to errors, so we manually
@@ -503,7 +512,7 @@ void EDDI::duplicateGlobals(
         auto *valueOperand =storeInst->getValueOperand();
         if(isa<CallBase>(valueOperand)){
           CallBase *callInst = cast<CallBase>(valueOperand);
-          if (callInst->getCalledFunction()->getName().equals("__cxa_begin_catch"))
+          if (callInst->getCalledFunction()!=NULL and callInst->getCalledFunction()->hasName() and callInst->getCalledFunction()->getName().equals("__cxa_begin_catch"))
           {return true;}
         }
         
@@ -607,7 +616,14 @@ int EDDI::duplicateInstruction(
 
       // duplicate the operands
       duplicateOperands(I, DuplicatedInstructionMap, ErrBB);
-
+      if(isa<InvokeInst>(I)) {
+        // In case of an invoke instruction, we have to fix the first invoke since 
+        // it would jump to the next BB and not to the duplicated invoke instruction
+        auto *IInstr = &cast<InvokeInst>(I);
+        toFixInvokes.insert(IInstr);
+        LLVM_DEBUG(dbgs() << "To fix duplicated invoke inst in " << IInstr->getParent()->getParent()->getName() << "\n");
+      }
+    
 // add consistency checks on I
 #ifdef CHECK_AT_CALLS
 #if (SELECTIVE_CHECKING == 1)
@@ -652,11 +668,11 @@ int EDDI::duplicateInstruction(
           }
 
           if (AlternateMemMapEnabled == false) {
-            args.insert(args.begin() + i, Original);
-            args.push_back(Copy);
-          } else {
+            args.insert(args.begin() + i, Copy);
             args.push_back(Original);
+          } else {
             args.push_back(Copy);
+            args.push_back(Original);
           }
           i++;
         }
@@ -737,6 +753,10 @@ EDDI::duplicateFnArgs(Function &Fn, Module &Md,
                                    Fn.getName() + "_dup", Fn.getParent());
   ValueToValueMapTy Params;
   for (int i = 0; i < Fn.arg_size(); i++) {
+    if (Fn.getArg(i)->hasStructRetAttr()) {
+      Fn.getArg(i)->removeAttr(Attribute::AttrKind::StructRet);
+    }
+
     if (AlternateMemMapEnabled == false) {
       Params[Fn.getArg(i)] = ClonedFunc->getArg(Fn.arg_size() + i);
     } else {
@@ -821,7 +841,6 @@ PreservedAnalyses EDDI::run(Module &Md, ModuleAnalysisManager &AM) {
 
   // list of duplicated instructions to remove since they are equal to the
   // original
-  std::list<Instruction *> InstructionsToRemove;
   int i = -1;
   int tot_funcs = 0;
   for (Function &Fn : Md) {
@@ -882,7 +901,7 @@ PreservedAnalyses EDDI::run(Module &Md, ModuleAnalysisManager &AM) {
             // the instruction duplicated may be equal to the original, so we
             // return shouldDelete in order to drop the duplicates
             if (shouldDelete) {
-              InstructionsToRemove.push_back(&I);
+              InstructionsToRemove.insert(&I);
             }
           }
         }
@@ -923,6 +942,17 @@ PreservedAnalyses EDDI::run(Module &Md, ModuleAnalysisManager &AM) {
       }
       ErrBB->eraseFromParent();
     }
+  }
+  for(InvokeInst *IInstr : toFixInvokes) {
+    // Split every toFixInvoke in two different BBs, with the first having the normal continuation 
+    // to the next invoke and both having the same landingpad
+    auto *NewBB = IInstr->getParent()->splitBasicBlockBefore(IInstr->getNextNonDebugInstruction());
+    auto *BrI = NewBB->getTerminator();
+    BrI->removeFromParent();
+    BrI->deleteValue();
+
+    // Update the first invoke's normal destination
+    IInstr->setNormalDest(NewBB->getNextNode());
   }
 
   // Drop the instructions that have been marked for removal earlier
