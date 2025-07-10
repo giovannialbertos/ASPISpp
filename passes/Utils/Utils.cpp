@@ -128,6 +128,47 @@ DebugLoc findNearestDebugLoc(Instruction &I) {
   return nullptr;
 }
 
+DebugLoc findNearestDebugLoc(Instruction *I) {
+  std::list<BasicBlock*> candidates;
+  if (I == nullptr) {
+    return nullptr;
+  }
+
+  if (I->getDebugLoc()) return I->getDebugLoc();
+
+  auto *PrevI = I->getPrevNonDebugInstruction();
+
+  while (PrevI && (PrevI = PrevI->getPrevNonDebugInstruction())) {
+    if (auto DL = PrevI->getDebugLoc()) {
+      return DL;
+    }
+  }
+
+  for (auto *U : I->getParent()->users()) {
+    candidates.push_back(cast<Instruction>(U)->getParent());
+  }
+
+  for (auto *BB : candidates) {
+    PrevI = BB->getTerminator();
+    while ((PrevI = PrevI->getPrevNonDebugInstruction())) {
+      if (auto DL = PrevI->getDebugLoc()) {
+        return DL;
+      }
+    }
+    for (auto *U : BB->users()) {
+      if(std::find(candidates.begin(), candidates.end(), cast<Instruction>(U)->getParent()) == candidates.end()) {
+        candidates.push_back(cast<Instruction>(U)->getParent());
+      }
+    }
+  }
+
+  errs() << "Could not find nearest debug location!\n";
+  errs() << "Instruction: " << *I << "\n";
+  errs() << "In function: \n";
+  errs() << *I->getParent()->getParent() << "\n";
+  return nullptr;
+}
+
 LinkageMap mapFunctionLinkageNames(const Module &M) {
     LinkageMap linkageMap;
     for (const Function &F : M) {

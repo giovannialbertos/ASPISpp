@@ -45,5 +45,5 @@ StringRef getLinkageName(const LinkageMap &linkageMap, const std::string &functi
 bool isIntrinsicToDuplicate(CallBase *CInstr);
 
 void createFtFuncs(Module &Md);
-
+DebugLoc findNearestDebugLoc(Instruction *I);
 #endif

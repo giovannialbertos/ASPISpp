@@ -261,7 +261,14 @@ void EDDI::addConsistencyChecks(
     BasicBlock &ErrBB) {
   std::vector<Value *> CmpInstructions;
 
-  if (FuncAnnotations.find(I.getParent()->getParent())!=FuncAnnotations.end() && FuncAnnotations.find(I.getParent()->getParent())->second.starts_with("no_check")) {
+  auto fn=I.getParent()->getParent();
+  if (fn->getName().ends_with("_dup")){
+    fn=fn->getParent()->getFunction(fn->getName().drop_back(4));
+  }
+  if (fn->getName().ends_with("_ret")){
+    fn=fn->getParent()->getFunction(fn->getName().drop_back(4));
+  }
+  if (FuncAnnotations.find(fn)!=FuncAnnotations.end() && FuncAnnotations.find(fn)->second.starts_with("no_check")) {
     return;
   }
   // split and add the verification BB
@@ -935,6 +942,32 @@ PreservedAnalyses EDDI::run(Module &Md, ModuleAnalysisManager &AM) {
         if (DebugEnabled) {
         for (Instruction &ErrI : *ErrBBCopy) {
           if (!I->getDebugLoc()) {
+            ErrI.setDebugLoc(findNearestDebugLoc(Fn.back().getTerminator()));
+          } else {
+            ErrI.setDebugLoc(I->getDebugLoc());
+            }
+          }
+        }
+        //IRBuilder<> B(ErrBBCopy->getTerminator());
+        //B.CreateBr(I->getSuccessor(I->getSuccessor(0)==ErrBB ? 1:0));
+        //ErrBBCopy->getTerminator()->eraseFromParent();
+        I->replaceSuccessorWith(ErrBB, ErrBBCopy);
+      }
+      ErrBB->eraseFromParent();
+      /* 
+      std::list<Instruction *> errBranches;
+      for (User *U : ErrBB->users()) {
+        Instruction *I = cast<Instruction>(U);
+        errBranches.push_back(I);
+      }
+      for (Instruction *I : errBranches) {
+        ValueToValueMapTy VMap;
+        BasicBlock *ErrBBCopy = CloneBasicBlock(ErrBB, VMap);
+        ErrBBCopy->insertInto(ErrBB->getParent(), I->getParent());
+        // set the debug location to the instruction the ErrBB is related to
+        if (DebugEnabled) {
+        for (Instruction &ErrI : *ErrBBCopy) {
+          if (!I->getDebugLoc()) {
             ErrI.setDebugLoc(findNearestDebugLoc(*Fn.back().getTerminator()));
           } else {
             ErrI.setDebugLoc(I->getDebugLoc());
@@ -943,7 +976,7 @@ PreservedAnalyses EDDI::run(Module &Md, ModuleAnalysisManager &AM) {
         }
         I->replaceSuccessorWith(ErrBB, ErrBBCopy);
       }
-      ErrBB->eraseFromParent();
+      ErrBB->eraseFromParent(); */
     }
   }
   for(InvokeInst *IInstr : toFixInvokes) {
