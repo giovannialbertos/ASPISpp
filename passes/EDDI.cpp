@@ -261,6 +261,9 @@ void EDDI::addConsistencyChecks(
     BasicBlock &ErrBB) {
   std::vector<Value *> CmpInstructions;
 
+  if (FuncAnnotations.find(I.getParent()->getParent())!=FuncAnnotations.end() && FuncAnnotations.find(I.getParent()->getParent())->second.starts_with("no_check")) {
+    return;
+  }
   // split and add the verification BB
   I.getParent()->splitBasicBlockBefore(&I);
   BasicBlock *VerificationBB =
