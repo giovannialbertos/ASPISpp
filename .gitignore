@@ -62,3 +62,6 @@ examples/sha/sha
 
 examples/cuda/*.txt
 examples/cuda/add
+
+*.csv
+*.pyc
