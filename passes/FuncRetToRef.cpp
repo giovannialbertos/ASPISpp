@@ -177,7 +177,7 @@ void FuncRetToRef::updateFunctionCalls(Function &Fn, Function &NewFn) {
 
 PreservedAnalyses FuncRetToRef::run(Module &Md, ModuleAnalysisManager &AM) {
     LinkageMap linkageMap=mapFunctionLinkageNames(Md);
-    return PreservedAnalyses::none();
+    //return PreservedAnalyses::none();
     std::map<Value*, StringRef> FuncAnnotations;
     getFuncAnnotations(Md, FuncAnnotations);
 

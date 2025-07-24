@@ -22,6 +22,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <fstream>
 #include <iostream>
@@ -261,6 +262,7 @@ void EDDI::addConsistencyChecks(
     BasicBlock &ErrBB) {
   std::vector<Value *> CmpInstructions;
 
+
   auto fn=I.getParent()->getParent();
   if (fn->getName().ends_with("_dup")){
     fn=fn->getParent()->getFunction(fn->getName().drop_back(4));
@@ -271,6 +273,7 @@ void EDDI::addConsistencyChecks(
   if (FuncAnnotations.find(fn)!=FuncAnnotations.end() && FuncAnnotations.find(fn)->second.starts_with("no_check")) {
     return;
   }
+
   // split and add the verification BB
   I.getParent()->splitBasicBlockBefore(&I);
   BasicBlock *VerificationBB =
@@ -948,9 +951,10 @@ PreservedAnalyses EDDI::run(Module &Md, ModuleAnalysisManager &AM) {
             }
           }
         }
-        //IRBuilder<> B(ErrBBCopy->getTerminator());
-        //B.CreateBr(I->getSuccessor(I->getSuccessor(0)==ErrBB ? 1:0));
-        //ErrBBCopy->getTerminator()->eraseFromParent();
+        IRBuilder<> B(ErrBBCopy->getTerminator());
+        assert(I->getNumSuccessors()==2);
+        B.CreateBr(I->getSuccessor(I->getSuccessor(0)==ErrBB ? 1:0));
+        ErrBBCopy->getTerminator()->eraseFromParent(); 
         I->replaceSuccessorWith(ErrBB, ErrBBCopy);
       }
       ErrBB->eraseFromParent();
