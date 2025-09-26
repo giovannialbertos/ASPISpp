@@ -22,7 +22,6 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include <array>
-#include <cassert>
 #include <cstddef>
 #include <fstream>
 #include <iostream>
@@ -43,6 +42,8 @@
 using namespace llvm;
 
 #define DEBUG_TYPE "eddi_verification"
+
+#define DUMMY_VALUE 0xabcd
 
 std::set<InvokeInst *> toFixInvokes;
 
@@ -262,7 +263,6 @@ void EDDI::addConsistencyChecks(
     BasicBlock &ErrBB) {
   std::vector<Value *> CmpInstructions;
 
-
   auto fn=I.getParent()->getParent();
   if (fn->getName().ends_with("_dup")){
     fn=fn->getParent()->getFunction(fn->getName().drop_back(4));
@@ -271,9 +271,10 @@ void EDDI::addConsistencyChecks(
     fn=fn->getParent()->getFunction(fn->getName().drop_back(4));
   }
   if (FuncAnnotations.find(fn)!=FuncAnnotations.end() && FuncAnnotations.find(fn)->second.starts_with("no_check")) {
+    errs() << "skipping: " << fn->getName() << "\n";
+    //assert(false && "Used no_check attribute!");
     return;
   }
-
   // split and add the verification BB
   I.getParent()->splitBasicBlockBefore(&I);
   BasicBlock *VerificationBB =
@@ -358,9 +359,21 @@ void EDDI::addConsistencyChecks(
   if (!CmpInstructions.empty()) {
     // all comparisons must be true
     Value *AndInstr = B.CreateAnd(CmpInstructions);
-    auto CondBrInst = B.CreateCondBr(AndInstr, I.getParent(), &ErrBB);
+
+    // the dummify bb contains a set of selects to invalidate inconsistent data, replacing the content with a placeholder
+    BasicBlock *DummyBB = BasicBlock::Create(I.getContext(), "dummify_bb", I.getParent()->getParent(), I.getParent()); 
+    IRBuilder<> DummyBuilder(DummyBB);
+
+    for (auto cmp : CmpInstructions) {
+      auto CmpInstruction = cast<Instruction>(cmp);
+      DummyBuilder.CreateSelect(cmp, CmpInstruction->getOperand(0), Constant::getAllOnesValue(CmpInstruction->getOperand(0)->getType()));
+    }
+    auto DummyBrInst = DummyBuilder.CreateCondBr(ConstantInt::getTrue(I.getContext()), &ErrBB, I.getParent());
+
+    auto CondBrInst = B.CreateCondBr(AndInstr, I.getParent(), DummyBB);
     if (DebugEnabled) {
       CondBrInst->setDebugLoc(I.getDebugLoc());
+      DummyBrInst->setDebugLoc(I.getDebugLoc());
     }
   }
 
@@ -951,10 +964,10 @@ PreservedAnalyses EDDI::run(Module &Md, ModuleAnalysisManager &AM) {
             }
           }
         }
+        // place the errbb inline
         IRBuilder<> B(ErrBBCopy->getTerminator());
-        assert(I->getNumSuccessors()==2);
         B.CreateBr(I->getSuccessor(I->getSuccessor(0)==ErrBB ? 1:0));
-        ErrBBCopy->getTerminator()->eraseFromParent(); 
+        ErrBBCopy->getTerminator()->eraseFromParent();
         I->replaceSuccessorWith(ErrBB, ErrBBCopy);
       }
       ErrBB->eraseFromParent();
