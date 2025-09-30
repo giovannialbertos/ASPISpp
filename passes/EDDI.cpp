@@ -361,14 +361,35 @@ void EDDI::addConsistencyChecks(
     Value *AndInstr = B.CreateAnd(CmpInstructions);
 
     // the dummify bb contains a set of selects to invalidate inconsistent data, replacing the content with a placeholder
-    BasicBlock *DummyBB = BasicBlock::Create(fn->getContext(), "dummify_bb", I.getParent()->getParent(), I.getParent()); 
+    BasicBlock *DummyBB = BasicBlock::Create(I.getContext(), "dummify_bb", I.getParent()->getParent(), I.getParent()); 
     IRBuilder<> DummyBuilder(DummyBB);
+    IRBuilder<> PHIDummyBuilder(&*I.getParent()->getFirstInsertionPt());
 
     for (auto cmp : CmpInstructions) {
       auto CmpInstruction = cast<Instruction>(cmp);
-      DummyBuilder.CreateSelect(cmp, CmpInstruction->getOperand(0), Constant::getAllOnesValue(CmpInstruction->getOperand(0)->getType()));
+      auto DummyVal1 = B.CreateSelect(cmp, CmpInstruction->getOperand(0), Constant::getAllOnesValue(CmpInstruction->getOperand(0)->getType()));
+      auto DummyVal2 = B.CreateSelect(cmp, CmpInstruction->getOperand(1), Constant::getAllOnesValue(CmpInstruction->getOperand(1)->getType()));
+
+
+      /* auto DummyPHI_1 = PHIDummyBuilder.CreatePHI(CmpInstruction->getOperand(0)->getType(), 2);
+      auto DummyPHI_2 = PHIDummyBuilder.CreatePHI(CmpInstruction->getOperand(1)->getType(), 2);
+      DummyPHI_1->addIncoming(DummyVal, &ErrBB);
+      DummyPHI_1->addIncoming(CmpInstruction->getOperand(0), VerificationBB);
+      DummyPHI_2->addIncoming(DummyVal, &ErrBB);
+      DummyPHI_2->addIncoming(CmpInstruction->getOperand(1), VerificationBB); */
+
+      for (auto &U : CmpInstruction->getOperand(0)->uses()) {
+        if (U.getUser() != CmpInstruction && U.getUser() != DummyVal1) {
+          U.set(DummyVal1);
+        }
+      }
+      for (auto &U : CmpInstruction->getOperand(1)->uses()) {
+        if (U.getUser() != CmpInstruction && U.getUser() != DummyVal2) {
+          U.set(DummyVal2);
+        }
+      }
     }
-    auto DummyBrInst = DummyBuilder.CreateCondBr(ConstantInt::getTrue(fn->getContext()), &ErrBB, I.getParent());
+    auto DummyBrInst = DummyBuilder.CreateBr(&ErrBB);
 
     auto CondBrInst = B.CreateCondBr(AndInstr, I.getParent(), DummyBB);
     if (DebugEnabled) {
@@ -966,9 +987,17 @@ PreservedAnalyses EDDI::run(Module &Md, ModuleAnalysisManager &AM) {
         }
         // place the errbb inline
         IRBuilder<> B(ErrBBCopy->getTerminator());
-        B.CreateBr(I->getSuccessor(I->getSuccessor(0)==ErrBB ? 1:0));
+        BasicBlock *DummyBB = I->getParent();
+        BasicBlock *Pred = DummyBB->getUniquePredecessor();
+        BasicBlock *DefaultSuccessor = Pred->getTerminator()->getSuccessor(Pred->getTerminator()->getSuccessor(0)==DummyBB ? 1:0);
+        B.CreateBr(DefaultSuccessor);
         ErrBBCopy->getTerminator()->eraseFromParent();
         I->replaceSuccessorWith(ErrBB, ErrBBCopy);
+        for (Instruction &phiinst : *DefaultSuccessor) {
+          if (isa<PHINode>(phiinst)) {
+            cast<PHINode>(phiinst).replaceIncomingBlockWith(ErrBB, ErrBBCopy);
+          }
+        }
       }
       ErrBB->eraseFromParent();
       /* 

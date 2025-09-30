@@ -71,6 +71,11 @@ Function* FuncRetToRef::updateFnSignature(Function &Fn, Module &Md) {
     if(ClonedFunc->hasRetAttribute(Attribute::ZExt)) {
         ClonedFunc->removeRetAttr(Attribute::ZExt);
     }
+
+    // we may have a zeroext ret attribute and we remove it as we have no return
+    if(ClonedFunc->hasRetAttribute(Attribute::SExt)) {
+        ClonedFunc->removeRetAttr(Attribute::SExt);
+    }
     
     // we may have a noundef ret attribute and we remove it as we have no return
     if(ClonedFunc->hasRetAttribute(Attribute::NoUndef)){
@@ -177,7 +182,7 @@ void FuncRetToRef::updateFunctionCalls(Function &Fn, Function &NewFn) {
 
 PreservedAnalyses FuncRetToRef::run(Module &Md, ModuleAnalysisManager &AM) {
     LinkageMap linkageMap=mapFunctionLinkageNames(Md);
-    return PreservedAnalyses::none();
+    // return PreservedAnalyses::none();
     std::map<Value*, StringRef> FuncAnnotations;
     getFuncAnnotations(Md, FuncAnnotations);
 
