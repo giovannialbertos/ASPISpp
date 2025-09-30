@@ -66,7 +66,6 @@ Function* FuncRetToRef::updateFnSignature(Function &Fn, Module &Md) {
     }
     SmallVector<ReturnInst*, 8> returns;
     CloneFunctionInto(ClonedFunc, &Fn, Params, CloneFunctionChangeType::LocalChangesOnly, returns);
-
     // we may have a zeroext ret attribute and we remove it as we have no return
     if(ClonedFunc->hasRetAttribute(Attribute::ZExt)) {
         ClonedFunc->removeRetAttr(Attribute::ZExt);
@@ -80,6 +79,10 @@ Function* FuncRetToRef::updateFnSignature(Function &Fn, Module &Md) {
     // we may have a noundef ret attribute and we remove it as we have no return
     if(ClonedFunc->hasRetAttribute(Attribute::NoUndef)){
         ClonedFunc->removeRetAttr(Attribute::NoUndef);
+    }
+
+    if(ClonedFunc->hasRetAttribute(Attribute::SExt)) {
+        ClonedFunc->removeRetAttr(Attribute::SExt);
     }
 
     updateRetInstructions(*ClonedFunc);

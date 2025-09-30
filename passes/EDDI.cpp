@@ -45,6 +45,8 @@ using namespace llvm;
 
 #define DUMMY_VALUE 0xabcd
 
+#define DUMMY_VALUE 0xabcd
+
 std::set<InvokeInst *> toFixInvokes;
 
 
@@ -271,6 +273,8 @@ void EDDI::addConsistencyChecks(
     fn=fn->getParent()->getFunction(fn->getName().drop_back(4));
   }
   if (FuncAnnotations.find(fn)!=FuncAnnotations.end() && FuncAnnotations.find(fn)->second.starts_with("no_check")) {
+    errs() << "skipping: " << fn->getName() << "\n";
+    //assert(false && "Used no_check attribute!");
     errs() << "skipping: " << fn->getName() << "\n";
     //assert(false && "Used no_check attribute!");
     return;
