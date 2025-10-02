@@ -382,15 +382,35 @@ void EDDI::addConsistencyChecks(
       DummyPHI_2->addIncoming(DummyVal, &ErrBB);
       DummyPHI_2->addIncoming(CmpInstruction->getOperand(1), VerificationBB); */
 
+      // Collect uses to replace 
+      std::vector<Use*> UsesToReplace1, UsesToReplace2;
+      auto *SelectInst1 = cast<Instruction>(DummyVal1);
+      auto *SelectInst2 = cast<Instruction>(DummyVal2);
+
       for (auto &U : CmpInstruction->getOperand(0)->uses()) {
-        if (U.getUser() != CmpInstruction && U.getUser() != DummyVal1) {
-          U.set(DummyVal1);
+        auto *UserInst = dyn_cast<Instruction>(U.getUser());
+        // Skip if it's the comparison, the select or if it comes before the select
+        if (U.getUser() != CmpInstruction && U.getUser() != DummyVal1 && UserInst &&
+            UserInst->getParent() == SelectInst1->getParent() && UserInst->comesBefore(SelectInst1) == false) {
+          UsesToReplace1.push_back(&U);
         }
       }
+
       for (auto &U : CmpInstruction->getOperand(1)->uses()) {
-        if (U.getUser() != CmpInstruction && U.getUser() != DummyVal2) {
-          U.set(DummyVal2);
+        auto *UserInst = dyn_cast<Instruction>(U.getUser());
+        // Same logic
+        if (U.getUser() != CmpInstruction && U.getUser() != DummyVal2 && UserInst &&
+            UserInst->getParent() == SelectInst2->getParent() && UserInst->comesBefore(SelectInst2) == false) {
+          UsesToReplace2.push_back(&U);
         }
+      }
+
+      // Now replace the collected uses
+      for (auto *U : UsesToReplace1) {
+        U->set(DummyVal1);
+      }
+      for (auto *U : UsesToReplace2) {
+        U->set(DummyVal2);
       }
     }
     auto DummyBrInst = DummyBuilder.CreateBr(&ErrBB);
